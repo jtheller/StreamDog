@@ -5,6 +5,13 @@ const path = require("path");
 const puppeteer = require("puppeteer");
 const log = require("./log");
 
+log.noCrash();
+log.clear();
+
+const configFile = __dirname + "/config.json";
+const configJson = fs.existsSync(configFile) && fs.readFileSync(configFile);
+if (!configJson) return multiLog("No configuration JSON present, exiting.");
+
 const {
   channelId,
   scanInterval,
@@ -13,7 +20,7 @@ const {
   regionCode,
   outputDir,
   useHtml
-} = config = JSON.parse(fs.readFileSync(__dirname + "/config.json"));
+} = config = JSON.parse(configJson);
 
 multiLog(config);
 
