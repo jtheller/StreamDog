@@ -1,0 +1,16 @@
+{
+  "name": "streamdog",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "JT WORKS",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.21.1",
+    "path": "^0.12.7",
+    "puppeteer": "^5.5.0"
+  }
+}
