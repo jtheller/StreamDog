@@ -65,6 +65,8 @@ const getChannelLiveUrl = () => `https://www.youtube.com/channel/${channelId}/li
 const getVideoUrl = videoId => `https://www.youtube.com/watch?v=${videoId}`;
 
 const startStreamRip = async (url, quality, outdir, filename) => new Promise((resolve, reject) => {
+  fs.existsSync(outdir) || fs.mkdirSync(outdir);
+
   const streamlink = spawn("streamlink", [url, quality, `-o ${normalizeName(filename)}`, "--force"], { cwd: outdir });
 
   streamlink.stdout.on("data", (data) => multiLog("streamlink:", data.toString()));
@@ -121,9 +123,8 @@ const getChannelLiveStatusViaHtml = async () => {
     const chatWindowElm = await page.$("ytd-live-chat-frame");
     if (!chatWindowElm) return noStream();
 
-    const titleContainerElm = await page.$(".title");
-    const titleElm = titleContainerElm && await titleContainerElm.$("yt-formatted-string");
-    const title = titleElm && await page.evaluate(title => title.innerHTML, titleElm);
+    const titleElm = await page.$(".title");
+    const title = titleElm && await page.evaluate(title => title.textContent, titleElm);
     
     if (title) {
       multiLog("Found stream", title);
