@@ -4,6 +4,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const puppeteer = require("puppeteer");
 const log = require("./log");
+const { resolve } = require("path");
 
 log.noCrash();
 log.clear();
@@ -21,6 +22,7 @@ const {
   outputDir,
   useHtml
 } = config = JSON.parse(configJson);
+const outdir = path.resolve(outputDir);
 
 multiLog(config);
 
@@ -71,12 +73,33 @@ const getChannelLiveUrl = () => `https://www.youtube.com/channel/${channelId}/li
 
 const getVideoUrl = videoId => `https://www.youtube.com/watch?v=${videoId}`;
 
-const startStreamRip = async (url, quality, outdir, filename) => new Promise((resolve, reject) => {
+const startStreamRipPoll = async (args) => {
+  if (isEmpty(args)) return;
+  let retry = 100, interval = 2000, i = 0;
+  const rip = async () => startStreamRip(args).catch(async err => {
+    i++;
+    if (i > retry) throw err;
+    multiLog("streamlink:", err);
+    multiLog(`Retrying after ${interval / 1000} second(s), tried ${i} time(s). Fail after ${retry} time(s).`);
+    await asyncPause(interval);
+    return rip();
+  });
+  return rip();
+};
+
+const startStreamRip = async ({ url, quality, outdir, filename }) => new Promise((resolve, reject) => {
   fs.existsSync(outdir) || fs.mkdirSync(outdir);
 
-  const streamlink = spawn("streamlink", [url, quality, `-o ${normalizeName(filename)}`, "--force"], { cwd: outdir });
+  const streamlink = spawn("streamlink", [url, quality, `-o ${normalizeName(filename).trim()}`, "--force"], { cwd: outdir });
 
-  streamlink.stdout.on("data", (data) => multiLog("streamlink:", data.toString()));
+  streamlink.stdout.on("data", data => {
+    const output = data.toString();
+    if ((output || "").match(/error/g)) {
+      // streamlink.kill();
+      return reject(output);
+    }
+    multiLog("streamlink:", output);
+  });
 
   streamlink.stderr.on("data", reject);
 
@@ -84,6 +107,29 @@ const startStreamRip = async (url, quality, outdir, filename) => new Promise((re
 
   streamlink.on("exit", resolve);
 });
+
+const checkAutoRemux = () => {
+  let videos = fs.existsSync(outdir) && fs.readdirSync(outdir);
+  videos = videos && videos.filter(v => (v || "").match(/\.ts/g));
+  if (isEmpty(videos)) return;
+
+  multiLog(".ts videos to remux", videos);
+
+  return new Promise((resolve, reject) => {
+    const command = `$v = gci -Filter *.ts; foreach ($i in $v) { $out = $($i.name.replace(".ts", '.mp4')); ffmpeg -i $i.name -c copy $out; if (Test-Path($out)) {ri $i -Force} }`;
+
+    const remux = spawn("powershell", ["-command", `&{${command}}`], { cwd: outdir });
+
+    remux.stderr.on("data", data => multiLog("remux:", data.toString()));
+
+    remux.stdout.on("data", reject);
+
+    remux.on("error", reject);
+
+    remux.on("exit", resolve);
+  })
+  .then(result => multiLog("Remux finished.", result));
+};
 
 const getChannelLiveStatusViaApi = async () => axios.get(getApiUrl())
   .then(response => {
@@ -101,8 +147,8 @@ const getChannelLiveStatusViaApi = async () => axios.get(getApiUrl())
     multiLog("Found stream", live);
     const url = getVideoUrl(videoId);
     const quality = "best";
-    const outdir = path.resolve(outputDir);
-    return [url, quality, outdir, `${title || videoId}.ts`];
+    const filename = `${title || videoId}.ts`;
+    return { url, quality, outdir, filename };
   })
   .catch(err => {
     if (err.response && err.response.data) return multiLog("YouTube Data API error", err.response.data);
@@ -136,8 +182,8 @@ const getChannelLiveStatusViaHtml = async () => {
     if (title) {
       multiLog("Found stream", title);
       const quality = "best";
-      const outdir = path.resolve(outputDir);
-      return [url, quality, outdir, `${title}.ts`];
+      const filename = `${title}.ts`;
+      return { url, quality, outdir, filename };
     }
     return noStream();
   })
@@ -145,8 +191,9 @@ const getChannelLiveStatusViaHtml = async () => {
 }
 
 const getChannelLiveStatus = () => (useHtml ? getChannelLiveStatusViaHtml() : getChannelLiveStatusViaApi())
-  .then(args => args && startStreamRip(...args))
-  .catch(err => multiLog("streamlink error", err));
+  .then(startStreamRipPoll)
+  .then(checkAutoRemux)
+  .catch(err => multiLog("getChannelLiveStatus error", err.toString()));
 
 const startScanInterval = async () => {
   await getChannelLiveStatus();
